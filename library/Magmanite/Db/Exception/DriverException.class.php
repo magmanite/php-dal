@@ -37,12 +37,16 @@ class DriverException extends Exception {
     const CANNOT_BE_SERIALIZED                  = 2;
     const CANNOT_BE_UNSERIALIZED                = 3;
     const CANNOT_CONNECT                        = 4;
-    const CANNOT_BE_CLONED                      = 5;
-    const INVALID_SQL                           = 6;
-    const INVALID_TRANSACTION_ID                = 7;
-    const CANNOT_START_TRANSACTION              = 8;
-    const TRANSACTION_WITH_ID_HAS_BEEN_STARTED  = 9;
-    const TRANSACTION_WITH_ID_DOES_NOT_EXISTS   = 10;
-    const CANNOT_COMMIT_TRANSACTION             = 11;
-    const CANNOT_ROLLBACK_TRANSACTION           = 12;
+    const CANNOT_DISCONNECT                     = 5;
+    const CANNOT_BE_CLONED                      = 6;
+    const INVALID_SQL                           = 7;
+    const INVALID_RESULT                        = 8;
+    const INVALID_TRANSACTION_ID                = 9;
+    const CANNOT_START_TRANSACTION              = 10;
+    const TRANSACTION_WITH_ID_HAS_BEEN_STARTED  = 11;
+    const TRANSACTION_WITH_ID_DOES_NOT_EXISTS   = 12;
+    const CANNOT_COMMIT_TRANSACTION             = 13;
+    const CANNOT_ROLLBACK_TRANSACTION           = 14;
+    const INVALID_DATABASE_CONNECTION           = 15;
+    const CANNOT_QUERY_DATABASE                 = 16;
 }

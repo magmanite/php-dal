@@ -53,17 +53,15 @@ abstract class Factory {
      *
      * @param \Magmanite\Db\Dsn $dsn Database Source Name
      *
-     * @return \Magmanite\Db\AbstractDriver Returns a concrete DAL instance
+     * @return \Magmanite\Db\InterfaceDriver Returns a concrete DAL instance
      *
      * @throws \Magmanite\Db\Exception\FactoryException
      */
     static public function getInstance(Dsn $dsn) {
         $className = self::DRIVER_CLASS_NAMESPACE . ucfirst($dsn->getDatabaseType());
-        var_dump($className);
         if (!class_exists($className)) {
             throw new FactoryException('DBAL Driver class not found: ' . $className, FactoryException::DRIVER_NOT_FOUND);
         }
-
         return new $className($dsn);
     }
 }

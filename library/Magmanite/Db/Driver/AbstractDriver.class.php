@@ -21,21 +21,40 @@
  * @license Apache 2.0
  */
 
-namespace Magmanite\Db;
+namespace Magmanite\Db\Driver;
 
 use \Magmanite\Db\Exception\DriverException;
+use \Magmanite\Db\InterfaceDriver;
 
 
 
 /**
- * Abstract DBAL driver
+ * Abstract DBAL driver.
  *
- * This class is the base class for all drivers.
- * All DBAL concrete class needs to extends this class.
+ * This is a base DBAL driver that you can choose to extends rather than
+ * implementing InterfaceDriver from scratch.
+ *
+ * You will still need to implement a few methods marked as abstract
+ * in this class.
  *
  * @author Hendri Kurniawan <hendri@kurniawan.id.au>
  */
-abstract class AbstractDriver {
+abstract class AbstractDriver implements \Magmanite\Db\InterfaceDriver {
+    /**
+     * Database connection handler
+     *
+     * @var mixed
+     */
+    private $_dbh = null;
+
+    /**
+     * List of transactions
+     * @var array<string>
+     */
+    private $_transactionList = array();
+
+
+
     /**
      * CONSTRUCTOR
      *
@@ -47,7 +66,8 @@ abstract class AbstractDriver {
      * @throws \Magmanite\Db\Excception\DriverException
      */
     public function __construct(\Magmanite\Db\Dsn $dsn) {
-        $this->_setupDbh($dsn);
+        $this->_dbhInit($dsn);
+        $this->_transactionInit();
     }
 
     /**
@@ -59,7 +79,8 @@ abstract class AbstractDriver {
      * @throws \Magmanite\Db\Excception\DriverException
      */
     public function __destruct() {
-        $this->_cleanupDbh();
+        $this->_transactionCleanup();
+        $this->_dbhCleanup();
     }
 
     /**
@@ -100,14 +121,12 @@ abstract class AbstractDriver {
 
 
 
+// -----------------------------------------------------------------------------
+// Implements for InterfaceDriver
+// -----------------------------------------------------------------------------
     /**
-     * Query database
-     *
-     * @param string $sql SQL query to be executed
-     *
-     * @return \Magmanite\Db\InterfaceResult Returns result object
-     *
-     * @throws \Magmanite\Db\Excception\DriverException
+     * (non-PHPdoc)
+     * @see \Magmanite\Db\InterfaceDriver::query()
      */
     public function query($sql) {
         // TODO Version 2 improvements: hooks
@@ -116,7 +135,7 @@ abstract class AbstractDriver {
             throw new DriverException('SQL must be a string', DriverException::INVALID_SQL);
         }
 
-        $result = $this->_query($sql);
+        $result = $this->_query($this->getDbh(), $sql);
         if (!($result instanceof \Magmanite\Db\InterfaceResult)) {
             throw new DriverException('Invalid result. Expecting InterfaceResult', DriverException::INVALID_RESULT);
         }
@@ -125,37 +144,36 @@ abstract class AbstractDriver {
     }
 
     /**
-     * Escape string value
-     *
-     * @param string $value String value to be escaped
-     *
-     * @return string Returns escaped string value
-     *
-     * @throws \Magmanite\Db\Excception\DriverException
+     * (non-PHPdoc)
+     * @see \Magmanite\Db\InterfaceDriver::queryUnbuffered()
+     */
+    public function queryUnbuffered($sql) {
+        // TODO Version 2 improvements: hooks
+
+        if (!is_string($sql)) {
+            throw new DriverException('SQL must be a string', DriverException::INVALID_SQL);
+        }
+
+        $result = $this->_queryUnbuffered($this->getDbh(), $sql);
+        if (!($result instanceof \Magmanite\Db\InterfaceResult)) {
+            throw new DriverException('Invalid result. Expecting InterfaceResult', DriverException::INVALID_RESULT);
+        }
+
+        return $result;
+    }
+
+    /**
+     * (non-PHPdoc)
+     * @see \Magmanite\Db\InterfaceDriver::escape()
      */
     public function escape($value) {
         // TODO Version 2 improvements: hooks
-        return $this->_escape(strval($value));
+        return $this->_escape($this->getDbh(), strval($value));
     }
 
-
-
-// -----------------------------------------------------------------------------
-// Variables and methods used for database connection handler
-// -----------------------------------------------------------------------------
     /**
-     * Database connection handler
-     *
-     * @var mixed
-     */
-    private $_dbh = null;
-
-
-
-    /**
-     * Get database handler
-     *
-     * @return mixed Return database handler
+     * (non-PHPdoc)
+     * @see \Magmanite\Db\InterfaceDriver::getDbh()
      */
     public function getDbh() {
         // TODO Version 2 improvements: hooks
@@ -163,13 +181,126 @@ abstract class AbstractDriver {
     }
 
     /**
+     * (non-PHPdoc)
+     * @see \Magmanite\Db\InterfaceDriver::transactionStart()
+     */
+    public function transactionStart($id) {
+        if (!$this->_transactionValidateId($id)) {
+            throw new DriverException('Transaction ID is not valid. Transaction ID must be an alpha-numeric string.',
+                DriverException::INVALID_TRANSACTION_ID);
+        }
+
+
+        if (array_key_exists($id, $this->_transactionList)) {
+            throw new DriverException(
+                "Transaction with id '{$id}' has already been started",
+                DriverException::TRANSACTION_WITH_ID_HAS_BEEN_STARTED);
+        }
+
+
+        if (count($this->_transactionList) === 0) {
+            $result = $this->_query($this->getDbh(), 'START TRANSACTION');
+            if (!$result->getStatus()) {
+                throw new DriverException('Cannot start transaction: '
+                    . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
+                    DriverException::CANNOT_START_TRANSACTION);
+            }
+        }
+
+
+        $result = $this->_query($this->getDbh(), "SAVEPOINT {$id}");
+        if (!$result->getStatus()) {
+            throw new DriverException('Cannot create savepoint: '
+                . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
+                DriverException::CANNOT_START_TRANSACTION);
+        }
+
+
+        // Add transaction ID to stack
+        array_push($this->_transactionList, $id);
+
+
+        return $this;
+    }
+
+    /**
+     * (non-PHPdoc)
+     * @see \Magmanite\Db\InterfaceDriver::transactionCommit()
+     */
+    public function transactionCommit($id) {
+        $newTransactionList = $this->_transactionGetStackUntil($id);
+
+        if (count($newTransactionList) === 0) {
+            $result = $this->_query($this->getDbh(), 'COMMIT');
+            if (!$result->getStatus()) {
+                throw new DriverException('Cannot commit transaction: '
+                    . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
+                    DriverException::CANNOT_COMMIT_TRANSACTION);
+            }
+        }
+
+        $this->_transactionList = $newTransactionList;
+
+        return $this;
+    }
+
+    /**
+     * (non-PHPdoc)
+     * @see \Magmanite\Db\InterfaceDriver::transactionRollback()
+     */
+    public function transactionRollback($id) {
+        $newTransactionList = $this->_transactionGetStackUntil($id);
+
+
+        // Rollback the whole transaction if there aren't any more
+        // "transactions" in the stack.
+        if (count($newTransactionList) === 0) {
+            $result = $this->_query($this->getDbh(), 'ROLLBACK');
+            if (!$result->getStatus()) {
+                throw new DriverException('Cannot rollback transaction: '
+                    . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
+                    DriverException::CANNOT_ROLLBACK_TRANSACTION);
+            }
+
+
+        // If we still have "transactions" in the stack,
+        // only rollback to specified save point.
+        } else {
+            $result = $this->_query($this->getDbh(), 'ROLLBACK TO SAVEPOINT ' . $id);
+            if (!$result->getStatus()) {
+                throw new DriverException('Cannot rollback transaction: '
+                    . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
+                    DriverException::CANNOT_ROLLBACK_TRANSACTION);
+            }
+        }
+
+
+        $this->_transactionList = $newTransactionList;
+        return $this;
+    }
+
+    /**
+     * (non-PHPdoc)
+     * @see \Magmanite\Db\InterfaceDriver::transactionList()
+     */
+    public function transactionList() {
+        return $this->_transactionList;
+    }
+// -----------------------------------------------------------------------------
+
+
+
+// -----------------------------------------------------------------------------
+// Protected functions
+// -----------------------------------------------------------------------------
+    /**
      * Setup Database Handler
      *
      * @param \Magmanite\Db\Dsn $dsn Data Source Name
      *
-     * @throws DriverException
+     * @throws \Magmanite\Db\Excception\DriverException
      */
-    protected function _setupDbh(\Magmanite\Db\Dsn $dsn) {
+    protected function _dbhInit(\Magmanite\Db\Dsn $dsn) {
         // TODO Version 2 improvements: hooks
 
         $dbh = $this->_connect($dsn);
@@ -183,120 +314,47 @@ abstract class AbstractDriver {
     /**
      * Cleanup database handler
      *
-     * @throws DriverException
+     * @throws \Magmanite\Db\Excception\DriverException
      */
-    protected function _cleanupDbh() {
+    protected function _dbhCleanup() {
         // TODO Version 2 improvements: hooks
 
         $this->_disconnect($this->_dbh);
         $this->_dbh = null;
     }
-// -----------------------------------------------------------------------------
 
-
-
-// -----------------------------------------------------------------------------
-// Variables and methods used for transaction
-// -----------------------------------------------------------------------------
-    private $_transactionList = array();
-
-
-
-    public function transactionStart($id) {
-        $id = $this->_transactionProcessId($id);
-
-
-        if (array_key_exists($id, $this->_transactionList)) {
-            throw new DriverException(
-                "Transaction with id '{$id}' has already been started",
-                DriverException::TRANSACTION_WITH_ID_HAS_BEEN_STARTED);
-        }
-
-
-        if (count($this->_transactionList) === 0) {
-            $result = $this->_query('START TRANSACTION');
-            if (!$result->getStatus()) {
-                throw new DriverException('Cannot start transaction: '
-                    . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
-                    DriverException::CANNOT_START_TRANSACTION);
-            }
-        }
-
-
-        $result = $this->_query("SAVEPOINT {$id}");
-        if (!$result->getStatus()) {
-            throw new DriverException('Cannot create savepoint: '
-                . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
-                DriverException::CANNOT_START_TRANSACTION);
-        }
-
-
-        return $this;
-    }
-
-    public function transactionCommit($id) {
-        $newTransactionList = $this->_transactionGetStackUntil($id);
-
-        if (count($newTransactionList) === 0) {
-            $result = $this->_query('COMMIT');
-            if (!$result->getStatus()) {
-                throw new DriverException('Cannot commit transaction: '
-                    . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
-                    DriverException::CANNOT_COMMIT_TRANSACTION);
-            }
-        }
-
-        $this->_transactionList = $newTransactionList;
-
-        return $this;
-    }
-
-    public function transactionRollback($id) {
-        $newTransactionList = $this->_transactionGetStackUntil($id);
-
-
-        // Rollback the whole transaction if there aren't any more
-        // "transactions" in the stack.
-        if (count($newTransactionList) === 0) {
-            $result = $this->_query('ROLLBACK');
-            if (!$result->getStatus()) {
-                throw new DriverException('Cannot rollback transaction: '
-                    . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
-                    DriverException::CANNOT_ROLLBACK_TRANSACTION);
-            }
-
-
-        // If we still have "transactions" in the stack,
-        // only rollback to specified save point.
-        } else {
-            $result = $this->_query('ROLLBACK TO SAVEPOINT ' . $id);
-            if (!$result->getStatus()) {
-                throw new DriverException('Cannot rollback transaction: '
-                    . $result->getErrorMessage() . ' (' . $result->getErrorCode() . ')',
-                    DriverException::CANNOT_ROLLBACK_TRANSACTION);
-            }
-        }
-
-
-        $this->_transactionList = $newTransactionList;
-        return $this;
-    }
-
-    public function transactionList() {
-        return $this->_transactionList;
-    }
-
-
-
-    protected function _transactionProcessId($id) {
+    /**
+     * Validate transaction ID
+     *
+     * At the moment, this method is validating if transaction ID is correct or not
+     *
+     * @param string $id Transaction ID to be processed
+     *
+     * @return boolean Returns TRUE if ID is correct FALSE otherwise
+     *
+     * @todo testing
+     */
+    protected function _transactionValidateId($id) {
         if (!is_string($id)) {
-            throw new DriverException('Transaction ID must be a string.',
-                DriverException::INVALID_TRANSACTION_ID);
+            return false;
         }
 
-        return preg_replace('[^A-Za-z0-9_]', '_', $id);
+        if (preg_match('/[^A-Za-z0-9_]/', $id)) {
+            return false;
+        }
+
+        return true;
     }
 
+    /**
+     * Get transaction stack until specified ID
+     *
+     * @param string $id Transaction ID to be searched
+     *
+     * @return array<string> Returns transaction array stack
+     *
+     * @throws \Magmanite\Db\Excception\DriverException
+     */
     protected function _transactionGetStackUntil($id) {
         $index = array_search($id, $this->_transactionList);
 
@@ -313,6 +371,26 @@ abstract class AbstractDriver {
         }
 
         return array_slice($this->_transactionList, 0, $index);
+    }
+
+    /**
+     * Initialize transaction
+     *
+     * This method is called in constructor.
+     * At the moment it doesn't do anything except initializing transaction stack array.
+     */
+    protected function _transactionInit() {
+        $this->_transactionList = array();
+    }
+
+    /**
+     * Transaction cleanup.
+     *
+     * This method is called in destructor.
+     * At the moment it doesn't do anything except cleaning up transaction stack array.
+     */
+    protected function _transactionCleanup() {
+        $this->_transactionList = null;
     }
 // -----------------------------------------------------------------------------
 
@@ -346,23 +424,37 @@ abstract class AbstractDriver {
     /**
      * Query database
      *
+     * @param mixed $dbh Database connection to use
      * @param string $sql SQL query to be executed
      *
      * @return \Magmanite\Db\InterfaceResult Returns result object
      *
      * @throws \Magmanite\Db\Excception\DriverException
      */
-    abstract protected function _query($sql);
+    abstract protected function _query($dbh, $sql);
+
+    /**
+     * Query database (unbuffered)
+     *
+     * @param mixed $dbh Database connection to use
+     * @param string $sql SQL query to be executed
+     *
+     * @return \Magmanite\Db\InterfaceResult Returns result object
+     *
+     * @throws \Magmanite\Db\Excception\DriverException
+     */
+    abstract protected function _queryUnbuffered($dbh, $sql);
 
     /**
      * Escape string value
      *
+     * @param mixed $dbh Database connection to use
      * @param string $value String value to be escaped
      *
      * @return string Returns escaped string value
      *
      * @throws \Magmanite\Db\Excception\DriverException
      */
-    abstract protected function _escape($value);
+    abstract protected function _escape($dbh, $value);
 // -----------------------------------------------------------------------------
 }

@@ -24,7 +24,21 @@ projects are:
 Requirements
 ------------
 
-PHP 5.3 or above, extensions for the database type that you want to use enabled. 
+PHP 5.3 or above, extensions for the database type that you want to use enabled.
+
+
+Usage
+-----
+Auto-loading needs to be set-up. A simple auto-loading mechanism example:
+
+    set_include_path(get_include_path() . PATH_SEPARATOR . (dirname(__DIR__) . '/library'));
+
+    spl_autoload_register(function($className) {
+        if (class_exists($className, false)) return;
+        if ('\\' === $className{0}) $className = substr($className, 1);
+        include str_replace('\\', DIRECTORY_SEPARATOR, $className) . '.class.php';
+    });
+
 
 
 License
