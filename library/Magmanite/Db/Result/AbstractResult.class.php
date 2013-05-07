@@ -1,10 +1,42 @@
 <?php
+/**
+ * Simple PHP Database Abstraction Layer
+ *
+ * Copyright 2013 Magmanite Pty Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * @link http://www.magmanite.com
+ * @copyright Copyright (c) 2013 Magmanite (http://www.magmanite.com)
+ * @license Apache 2.0
+ */
+
 namespace Magmanite\Db\Result;
 
 use Magmanite\Db\Exception\ResultException;
 
 
 
+/**
+ * Abstract result
+ *
+ * This abstract result class provide basic implementations that can
+ * be extended by a concrete result class.
+ *
+ * Each concrete result class may choose to extend this object.
+ *
+ * @author Hendri Kurniawan <hendri@kurniawan.id.au>
+ */
 abstract class AbstractResult implements \Magmanite\Db\InterfaceResult {
     /**
      * Database connection being used

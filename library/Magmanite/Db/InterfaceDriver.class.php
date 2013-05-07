@@ -28,7 +28,7 @@ namespace Magmanite\Db;
 /**
  * DBAL Driver Interface
  *
- * This is DBAL Driver Interface that all DBAL Driver needs to extends this.
+ * Concrete implementation of DBAL driver needs to adhere to this interface.
  *
  * @author Hendri Kurniawan <hendri@kurniawan.id.au>
  */
@@ -46,6 +46,8 @@ interface InterfaceDriver {
 
     /**
      * Query database (Unbuffered)
+     *
+     * This is un-buffered query. It is diffe
      *
      * @param string $sql SQL query to be executed
      *
